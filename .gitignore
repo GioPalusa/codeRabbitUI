@@ -60,3 +60,11 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# Local release artifacts / secrets
+.DS_Store
+CodeRabbit.app/
+dist/
+*.dmg
+*.p12
+bg-white-dmg.png
