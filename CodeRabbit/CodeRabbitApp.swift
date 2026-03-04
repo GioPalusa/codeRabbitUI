@@ -9,9 +9,16 @@ import SwiftUI
 
 @main
 struct CodeRabbitApp: App {
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
-    }
+	@StateObject private var historyStore = ReviewHistoryStore()
+
+	var body: some Scene {
+		WindowGroup {
+			ContentView()
+				.environmentObject(historyStore)
+		}
+		Settings {
+			SettingsView()
+				.environmentObject(historyStore)
+		}
+	}
 }
