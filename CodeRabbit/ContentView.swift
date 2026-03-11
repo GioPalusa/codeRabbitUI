@@ -133,11 +133,11 @@ struct ContentView: View {
 		.onChange(of: reviewConfigFilesJSON) { _, _ in
 			runner.configFiles = parsedReviewConfigFiles
 		}
-		.onChange(of: runner.completedRunID) { _, newValue in
-			guard let newValue else { return }
-			let trimmedActiveRunCommand = activeRunCommandPreview?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-			let persistedCommand = trimmedActiveRunCommand.isEmpty ? effectiveCommandPreview : trimmedActiveRunCommand
-			historyStore.add(
+			.onChange(of: runner.completedRunID) { _, newValue in
+				guard let newValue else { return }
+				let trimmedActiveRunCommand = activeRunCommandPreview?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+				let persistedCommand = trimmedActiveRunCommand.isEmpty ? effectiveCommandPreview : trimmedActiveRunCommand
+				historyStore.add(
 				id: newValue,
 				createdAt: runner.currentRunStartedAt ?? Date(),
 				command: persistedCommand,
@@ -145,10 +145,11 @@ struct ContentView: View {
 				rawOutput: runner.rawOutput,
 				findings: runner.findings,
 				phases: runner.phases,
-				statusLabel: statusText
-			)
-			activeRunCommandPreview = nil
-		}
+					statusLabel: statusText
+				)
+				requestDockBounceForCompletedReview()
+				activeRunCommandPreview = nil
+			}
 		.onChange(of: runner.currentRunID) { _, newValue in
 			guard let newValue else { return }
 			activeRunCommandPreview = effectiveCommandPreview
@@ -1519,6 +1520,11 @@ struct ContentView: View {
 
 	private func normalizedComparisonBaseMode(_ value: String) -> ComparisonBaseMode {
 		ComparisonBaseMode(rawValue: value.trimmingCharacters(in: .whitespacesAndNewlines)) ?? .automatic
+	}
+
+	private func requestDockBounceForCompletedReview() {
+		guard NSApp.isActive == false else { return }
+		NSApp.requestUserAttention(.informationalRequest)
 	}
 
 	private func applyComparisonBaseToRunner() {
