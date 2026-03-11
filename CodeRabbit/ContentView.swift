@@ -676,6 +676,8 @@ struct ContentView: View {
 		let hasNoFindingsResult = completion?.hasNoFindings == true
 		let hasAnyOutput = !rawOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 		let shouldAutoExpandAgentPrompts = commandContainsFlag(command, long: "--prompt-only")
+		let combinedAIAgentPrompt = ReviewParser.combinedAIAgentPrompt(from: findings)
+		let aiPromptCount = findings.compactMap(\.aiPrompt).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
 		return VStack(alignment: .leading, spacing: 8) {
 			Text("Parsed Findings: \(findings.count)")
 				.font(.headline)
@@ -820,12 +822,80 @@ struct ContentView: View {
 									.stroke(Color.secondary.opacity(0.2), lineWidth: 1)
 							)
 						}
+
+						if let combinedAIAgentPrompt {
+							combinedPromptCard(
+								prompt: combinedAIAgentPrompt,
+								sourceCount: aiPromptCount,
+								shouldAutoExpand: shouldAutoExpandAgentPrompts
+							)
+						}
 					}
 					.padding(.vertical, 2)
 				}
 			}
 		}
 		.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+	}
+
+	private func combinedPromptCard(prompt: String, sourceCount: Int, shouldAutoExpand: Bool) -> some View {
+		let key = combinedPromptKey(for: prompt)
+		return VStack(alignment: .leading, spacing: 8) {
+			HStack(spacing: 8) {
+				Image(systemName: "rectangle.stack.badge.person.crop.fill")
+					.foregroundStyle(Color.accentColor)
+				Text("Combined Prompt for AI Agent")
+					.font(.subheadline.weight(.semibold))
+				Spacer()
+				Text("\(sourceCount) prompt\(sourceCount == 1 ? "" : "s")")
+					.font(.caption2.weight(.semibold))
+					.foregroundStyle(Color.accentColor)
+					.padding(.horizontal, 8)
+					.padding(.vertical, 3)
+					.background(Color.accentColor.opacity(0.18))
+					.clipShape(Capsule())
+			}
+
+			if shouldAutoExpand {
+				HStack(spacing: 6) {
+					Image(systemName: "chevron.down")
+						.font(.caption2)
+					Text("Auto-expanded in prompt-only mode")
+					Spacer()
+				}
+				.font(.caption)
+				.foregroundStyle(.secondary)
+			} else {
+				Button {
+					togglePrompt(forKey: key)
+				} label: {
+					HStack(spacing: 6) {
+						Image(systemName: isPromptExpanded(forKey: key) ? "chevron.down" : "chevron.right")
+							.font(.caption2)
+						Text("Prompt Bundle")
+						Spacer()
+					}
+				}
+				.buttonStyle(.plain)
+			}
+
+			if shouldAutoExpand || isPromptExpanded(forKey: key) {
+				VStack(alignment: .leading, spacing: 8) {
+					codeBlock(prompt)
+					Button("Copy Combined Prompt") {
+						NSPasteboard.general.clearContents()
+						NSPasteboard.general.setString(prompt, forType: .string)
+					}
+					.buttonStyle(.borderedProminent)
+					.controlSize(.small)
+				}
+			}
+		}
+		.padding(12)
+		.frame(maxWidth: .infinity, alignment: .leading)
+		.background(Color.accentColor.opacity(0.1))
+		.clipShape(RoundedRectangle(cornerRadius: 10))
+		.overlay(overlayRoundedBorder(color: .accentColor.opacity(0.35)))
 	}
 
 	private func rawOutputView(rawOutput: String) -> some View {
@@ -1507,6 +1577,10 @@ struct ContentView: View {
 			finding.typeRaw ?? finding.typeDisplay,
 			finding.aiPrompt ?? "",
 		].joined(separator: "|")
+	}
+
+	private func combinedPromptKey(for prompt: String) -> String {
+		"combined|\(prompt.count)|\(prompt.hashValue)"
 	}
 
 	private func resolvedFindings(for item: ReviewHistoryItem) -> [ReviewFinding] {

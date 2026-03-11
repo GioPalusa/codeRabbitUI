@@ -68,3 +68,4 @@ dist/
 *.dmg
 *.p12
 bg-white-dmg.png
+.DerivedData

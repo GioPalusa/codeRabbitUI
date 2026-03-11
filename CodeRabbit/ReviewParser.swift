@@ -16,6 +16,8 @@ struct ReviewRunErrorInfo {
 }
 
 struct ReviewParser {
+    static let aiAgentVerificationPrefix = "Verify each finding against the current code and only fix it if needed."
+
     static func parse(from text: String) -> [ReviewFinding] {
         let plainTextFindings = parsePlainTextSections(from: text)
         if !plainTextFindings.isEmpty {
@@ -61,6 +63,27 @@ struct ReviewParser {
         return findings
     }
 
+    static func combinedAIAgentPrompt(from findings: [ReviewFinding]) -> String? {
+        let prompts = findings
+            .compactMap { $0.aiPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !prompts.isEmpty else { return nil }
+
+        let combinedBodies = prompts.compactMap { prompt -> String? in
+            if let stripped = stripLeadingVerificationPrefix(from: prompt) {
+                return stripped.isEmpty ? nil : stripped
+            }
+            return prompt
+        }
+
+        guard !combinedBodies.isEmpty else {
+            return aiAgentVerificationPrefix
+        }
+
+        return aiAgentVerificationPrefix + "\n\n" + combinedBodies.joined(separator: "\n\n")
+    }
+
     private static func parseGitHubStyle(_ line: String) -> ReviewFinding? {
         // Example: path/to/File.swift:42: warning: message
         let pattern = #"^(.+):(\d+):\s*(error|warning|info):\s*(.+)$"#
@@ -89,6 +112,21 @@ struct ReviewParser {
             proposedFix: nil,
             aiPrompt: nil
         )
+    }
+
+    private static func stripLeadingVerificationPrefix(from prompt: String) -> String? {
+        let lines = prompt.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard let firstNonEmptyIndex = lines.firstIndex(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+            return nil
+        }
+
+        let firstNonEmptyLine = lines[firstNonEmptyIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard firstNonEmptyLine.caseInsensitiveCompare(aiAgentVerificationPrefix) == .orderedSame else {
+            return nil
+        }
+
+        let remaining = lines.dropFirst(firstNonEmptyIndex + 1).joined(separator: "\n")
+        return remaining.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func parseBracketStyle(_ line: String) -> ReviewFinding? {

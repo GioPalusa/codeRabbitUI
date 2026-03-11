@@ -2,7 +2,7 @@ import XCTest
 @testable import CodeRabbit
 
 final class ReviewParserPlainTextTests: XCTestCase {
-    func testParsePlainTextFindingWithCommentDiffAndPrompt() {
+    func testParsePlainTextFindingWithCommentDiffAndPrompt() throws {
         let input = """
         Starting CodeRabbit review in plain text mode...
 
@@ -429,5 +429,62 @@ final class ReviewParserPlainTextTests: XCTestCase {
         XCTAssertTrue(finding?.commentText.contains("Potential test flakiness") == true)
         XCTAssertTrue(diff?.lines.contains(where: { $0.text.contains("let eventPublisher = sut.$events.first") }) == true)
         XCTAssertTrue(diff?.lines.contains(where: { $0.text.contains("XCTAssertTrue(events.contains(.quickBalance))") }) == true)
+    }
+
+    func testCombinedAIAgentPromptCollapsesSharedVerificationLine() {
+        let promptA = """
+        Verify each finding against the current code and only fix it if needed.
+
+        In @FileA.swift around lines 10 - 20, apply fix A.
+        """
+        let promptB = """
+        Verify each finding against the current code and only fix it if needed.
+
+        In @FileB.swift around lines 30 - 40, apply fix B.
+        """
+
+        let combined = ReviewParser.combinedAIAgentPrompt(from: [
+            makeFinding(prompt: promptA),
+            makeFinding(prompt: promptB),
+        ])
+
+        XCTAssertEqual(
+            combined,
+            """
+            Verify each finding against the current code and only fix it if needed.
+
+            In @FileA.swift around lines 10 - 20, apply fix A.
+
+            In @FileB.swift around lines 30 - 40, apply fix B.
+            """
+        )
+    }
+
+    func testCombinedAIAgentPromptReturnsPrefixWhenOnlySharedLineExists() {
+        let combined = ReviewParser.combinedAIAgentPrompt(from: [
+            makeFinding(prompt: ReviewParser.aiAgentVerificationPrefix)
+        ])
+
+        XCTAssertEqual(combined, ReviewParser.aiAgentVerificationPrefix)
+    }
+
+    func testCombinedAIAgentPromptIsNilWithoutPrompts() {
+        let combined = ReviewParser.combinedAIAgentPrompt(from: [makeFinding(prompt: nil)])
+        XCTAssertNil(combined)
+    }
+
+    private func makeFinding(prompt: String?) -> ReviewFinding {
+        ReviewFinding(
+            severity: .warning,
+            file: "Example.swift",
+            line: 1,
+            lineEnd: 2,
+            typeRaw: "potential_issue",
+            typeDisplay: "potential_issue",
+            appliesTo: nil,
+            commentText: "Example finding",
+            proposedFix: nil,
+            aiPrompt: prompt
+        )
     }
 }
