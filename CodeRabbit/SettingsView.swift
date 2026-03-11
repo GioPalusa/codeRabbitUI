@@ -19,7 +19,7 @@ struct SettingsView: View {
 		VStack(spacing: 12) {
 			Form {
 				Section("CodeRabbit CLI") {
-					TextField("Executable path", text: $coderabbitExecutablePath)
+					TextField("", text: $coderabbitExecutablePath)
 					HStack {
 						Button("Detect Installed CLI") {
 							detectInstalledCLIPath()

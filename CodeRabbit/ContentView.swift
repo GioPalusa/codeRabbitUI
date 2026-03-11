@@ -366,6 +366,10 @@ struct ContentView: View {
                             .foregroundStyle(Color.white.opacity(0.85))
                     }
 
+                    if let updateCommand = latestCLIUpdateCommand {
+                        cliUpdatePromptCard(command: updateCommand)
+                    }
+
                     VStack(spacing: 14) {
                         triggerSettingRow(title: "Project Folder") {
                             Picker("Project folder", selection: $selectedProjectFolderPath) {
@@ -878,8 +882,6 @@ struct ContentView: View {
         let combinedAIAgentPrompt = ReviewParser.combinedAIAgentPrompt(from: findings)
         let aiPromptCount = findings.compactMap(\.aiPrompt).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
         return VStack(alignment: .leading, spacing: 8) {
-            Text("Parsed Findings: \(findings.count)")
-                .font(.headline)
             if findings.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     if showsLoadingPlaceholder {
@@ -889,7 +891,7 @@ struct ContentView: View {
                         HStack(spacing: 8) {
                             ProgressView()
                                 .controlSize(.small)
-                            Text("Rabbit is reviewing your code...")
+                            Text("CodeRabbit is reviewing your code...")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Color.accentColor)
                         }
@@ -1522,6 +1524,52 @@ struct ContentView: View {
 
     private func normalizedReviewOutputMode(_ value: String) -> ReviewOutputMode {
         ReviewOutputMode(rawValue: value.trimmingCharacters(in: .whitespacesAndNewlines)) ?? .full
+    }
+
+    private var latestCLIUpdateCommand: String? {
+        if let command = ReviewParser.parseCLIUpdateCommand(from: runner.rawOutput) {
+            return command
+        }
+
+        if let mostRecentHistoryOutput = historyStore.items.first?.rawOutput {
+            return ReviewParser.parseCLIUpdateCommand(from: mostRecentHistoryOutput)
+        }
+
+        return nil
+    }
+
+    private func cliUpdatePromptCard(command: String) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(Color.orange)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("CodeRabbit CLI update available")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text("Run `\(command)` before your next review.")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.white.opacity(0.9))
+            }
+
+            Spacer(minLength: 0)
+
+            Button("Copy Command") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(command, forType: .string)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color.orange)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black.opacity(0.2))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.orange.opacity(0.7), lineWidth: 1.2)
+        )
     }
 
     private func requestNotificationAuthorizationIfNeeded() {

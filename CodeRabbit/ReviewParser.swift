@@ -17,6 +17,7 @@ struct ReviewRunErrorInfo {
 
 struct ReviewParser {
     static let aiAgentVerificationPrefix = "Verify each finding against the current code and only fix it if needed."
+    private static let cliUpdateDefaultCommand = "coderabbit update"
 
     static func parse(from text: String) -> [ReviewFinding] {
         let plainTextFindings = parsePlainTextSections(from: text)
@@ -82,6 +83,25 @@ struct ReviewParser {
         }
 
         return aiAgentVerificationPrefix + "\n\n" + combinedBodies.joined(separator: "\n\n")
+    }
+
+    static func parseCLIUpdateCommand(from text: String) -> String? {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        for rawLine in lines {
+            let trimmedLine = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmedLine.lowercased().hasPrefix("run:") else { continue }
+
+            let commandCandidate = String(trimmedLine.dropFirst("Run:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !commandCandidate.isEmpty else { continue }
+            return commandCandidate
+        }
+
+        if text.localizedCaseInsensitiveContains("new update available") {
+            return cliUpdateDefaultCommand
+        }
+
+        return nil
     }
 
     private static func parseGitHubStyle(_ line: String) -> ReviewFinding? {
