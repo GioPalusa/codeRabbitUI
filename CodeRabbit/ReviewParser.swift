@@ -15,7 +15,7 @@ struct ReviewRunErrorInfo {
     let rawLine: String
 }
 
-struct ReviewParser {
+enum ReviewParser {
     static let aiAgentVerificationPrefix = "Verify each finding against the current code and only fix it if needed."
     private static let cliUpdateDefaultCommand = "coderabbit update"
 
@@ -335,8 +335,7 @@ struct ReviewParser {
             // Fallback: some findings embed a code diff inside Comment: without a dedicated
             // "Suggested/Proposed/Alternative..." header. Split that inline diff out.
             if finalProposedFixLines.isEmpty,
-               let inline = splitInlineProposedFixFromComment(commentLines: commentLines)
-            {
+               let inline = splitInlineProposedFixFromComment(commentLines: commentLines) {
                 finalComment = inline.comment
                 finalProposedFixLines = parseDiffLines(from: trimTrailingNarrativeAfterDiff(in: inline.proposedFixLines))
             }
@@ -563,8 +562,7 @@ struct ReviewParser {
                 || leadingTrimmed.hasPrefix("diff ")
                 || leadingTrimmed.hasPrefix("index ")
                 || leadingTrimmed.hasPrefix("---")
-                || leadingTrimmed.hasPrefix("+++")
-            {
+                || leadingTrimmed.hasPrefix("+++") {
                 kind = .meta
             } else {
                 kind = .context
@@ -754,7 +752,7 @@ struct ReviewParser {
         return retry.isEmpty ? nil : retry
     }
 
-    nonisolated private static func parseRetryAfterSeconds(from text: String) -> TimeInterval? {
+    private nonisolated static func parseRetryAfterSeconds(from text: String) -> TimeInterval? {
         let lowered = text.lowercased()
         let pattern = #"(\d+)\s*(minute|minutes|second|seconds)"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
@@ -762,7 +760,7 @@ struct ReviewParser {
         let matches = regex.matches(in: lowered, options: [], range: nsrange)
         guard !matches.isEmpty else { return nil }
 
-        var totalSeconds: Int = 0
+        var totalSeconds = 0
         for match in matches {
             guard
                 let valueRange = Range(match.range(at: 1), in: lowered),
@@ -785,15 +783,15 @@ struct ReviewParser {
         var lower = 0
         var upper = lines.count - 1
 
-        while lower < lines.count && lines[lower].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        while lower < lines.count, lines[lower].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             lower += 1
         }
-        while upper >= lower && lines[upper].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        while upper >= lower, lines[upper].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             upper -= 1
         }
 
         guard lower <= upper else { return [] }
-        return Array(lines[lower...upper])
+        return Array(lines[lower ... upper])
     }
 
     private static func parseTimestamp(from line: String) -> Date? {
