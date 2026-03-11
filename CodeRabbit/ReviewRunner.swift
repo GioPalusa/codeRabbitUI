@@ -20,6 +20,7 @@ final class ReviewRunner: ObservableObject {
 	@Published private(set) var currentRunID: UUID?
 	@Published private(set) var currentRunStartedAt: Date?
 	@Published private(set) var completedRunID: UUID?
+	@Published private(set) var completedRequestID: UUID?
 
 	private var process: Process?
 	private var securityScopedExecutableURL: URL?
@@ -61,12 +62,13 @@ final class ReviewRunner: ObservableObject {
 	}
 
 	func runReview() {
+		let requestID = UUID()
 		Task { [weak self] in
-			await self?.runReviewAsync()
+			await self?.runReviewAsync(requestID: requestID)
 		}
 	}
 
-	private func runReviewAsync() async {
+	private func runReviewAsync(requestID: UUID) async {
 		if case .running = status {
 			return
 		}
@@ -76,11 +78,13 @@ final class ReviewRunner: ObservableObject {
 			let minutes = max(0, secondsLeft / 60)
 			let seconds = max(0, secondsLeft % 60)
 			status = .failed("Rate limit active. Try again in \(minutes)m \(seconds)s.")
+			completedRequestID = requestID
 			return
 		}
 
 		guard !selectedFolderPath.isEmpty else {
 			status = .failed("Pick a project folder before running a review.")
+			completedRequestID = requestID
 			return
 		}
 
@@ -90,16 +94,18 @@ final class ReviewRunner: ObservableObject {
 		guard let resolution = await resolveExecutablePath() else {
 			logDebug("No executable found. Override executable: \(overridePath.isEmpty ? "empty" : overridePath)")
 			status = .failed("CodeRabbit CLI not found. Default path is \(ReviewRunner.defaultExecutablePath()). Install it there or update the executable path in Settings.")
+			completedRequestID = requestID
 			return
 		}
 			logDebug("Using executable: \(resolution.path)")
 			securityScopedExecutableURL = resolution.scopedURL
-			guard let projectFolderURL = resolveProjectFolderURL() else {
-				securityScopedExecutableURL?.stopAccessingSecurityScopedResource()
-				securityScopedExecutableURL = nil
-				status = .failed("Folder permission missing. Click Open Folder and re-select the project folder.")
-				return
-			}
+				guard let projectFolderURL = resolveProjectFolderURL() else {
+					securityScopedExecutableURL?.stopAccessingSecurityScopedResource()
+					securityScopedExecutableURL = nil
+					status = .failed("Folder permission missing. Click Open Folder and re-select the project folder.")
+					completedRequestID = requestID
+					return
+				}
 			securityScopedProjectFolderURL = projectFolderURL
 
 		rawOutput = ""
@@ -183,12 +189,13 @@ final class ReviewRunner: ObservableObject {
 					self.runErrorInfo = nil
 					self.nextAllowedRunAt = nil
 					self.status = .completed(terminatedProcess.terminationStatus)
+					}
+					self.completedRunID = runID
+					self.completedRequestID = requestID
+					self.currentRunID = nil
+					self.currentRunStartedAt = nil
 				}
-				self.completedRunID = runID
-				self.currentRunID = nil
-				self.currentRunStartedAt = nil
 			}
-		}
 
 		do {
 			try process.run()
@@ -198,10 +205,11 @@ final class ReviewRunner: ObservableObject {
 				securityScopedExecutableURL = nil
 				securityScopedProjectFolderURL?.stopAccessingSecurityScopedResource()
 				securityScopedProjectFolderURL = nil
-				status = .failed("Failed to run command: \(error.localizedDescription)")
-				currentRunID = nil
-				currentRunStartedAt = nil
-		}
+					status = .failed("Failed to run command: \(error.localizedDescription)")
+					completedRequestID = requestID
+					currentRunID = nil
+					currentRunStartedAt = nil
+			}
 	}
 
 	func prepareForNewReview() {
