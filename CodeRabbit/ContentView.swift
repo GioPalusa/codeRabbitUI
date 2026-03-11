@@ -46,7 +46,8 @@ private struct FindingTypeCounts {
 }
 
 struct ContentView: View {
-    @EnvironmentObject private var historyStore: ReviewHistoryStore
+	@EnvironmentObject private var historyStore: ReviewHistoryStore
+	@Environment(\.colorScheme) private var colorScheme
 
     @StateObject private var runner = ReviewRunner()
     @State private var selectedLiveTab: Int = 0
@@ -326,25 +327,17 @@ struct ContentView: View {
 
     private var newReviewTriggerView: some View {
         ZStack(alignment: .topTrailing) {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.20, green: 0.10, blue: 0.04),
-                    Color(red: 0.36, green: 0.17, blue: 0.06),
-                    Color(red: 0.16, green: 0.07, blue: 0.03),
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            triggerHeroBackgroundGradient
+                .ignoresSafeArea()
 
             Circle()
-                .fill(Color.white.opacity(0.08))
+                .fill(triggerHeroOrbPrimaryColor)
                 .frame(width: 280, height: 280)
                 .blur(radius: 10)
                 .offset(x: -260, y: -180)
 
             Circle()
-                .fill(Color.orange.opacity(0.22))
+                .fill(triggerHeroOrbAccentColor)
                 .frame(width: 220, height: 220)
                 .blur(radius: 18)
                 .offset(x: 250, y: 180)
@@ -360,10 +353,10 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Let's review your code!")
                             .font(.system(size: 34, weight: .heavy, design: .rounded))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(triggerHeroTitleColor)
                         Text("Pick settings, hit start, then we switch to the full review workspace.")
                             .font(.subheadline)
-                            .foregroundStyle(Color.white.opacity(0.85))
+                            .foregroundStyle(triggerHeroSubtitleColor)
                     }
 
                     if let updateCommand = latestCLIUpdateCommand {
@@ -413,23 +406,23 @@ struct ContentView: View {
                         triggerSettingRow(title: "Command Preview") {
                             Text(effectiveCommandPreview)
                                 .font(.system(.subheadline, design: .monospaced))
-                                .foregroundStyle(Color.white.opacity(0.95))
+                                .foregroundStyle(triggerCommandPreviewColor)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .textSelection(.enabled)
                         }
                     }
                     .padding(16)
-                    .background(Color.orange.opacity(0.14))
+                    .background(triggerSettingsPanelBackgroundColor)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(Color.white.opacity(0.24), lineWidth: 1)
+                            .stroke(triggerSettingsPanelBorderColor, lineWidth: 1)
                     )
 
                     HStack {
                         Spacer()
                         runActionButton
-                            .tint(Color.orange)
+                            .tint(triggerActionTintColor)
                             .frame(maxWidth: 220)
                         Spacer()
                     }
@@ -443,7 +436,7 @@ struct ContentView: View {
 
             SettingsLink {
                 Image(systemName: "gearshape.fill")
-                    .foregroundStyle(.white)
+                    .foregroundStyle(triggerHeroTitleColor)
             }
             .padding(.top, 20)
             .padding(.trailing, 20)
@@ -456,7 +449,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.white.opacity(0.72))
+                .foregroundStyle(triggerSettingLabelColor)
             content()
         }
     }
@@ -928,7 +921,7 @@ struct ContentView: View {
                                         .padding(.horizontal, 10)
                                         .padding(.vertical, 4)
                                         .background(severityColor(finding.severity))
-                                        .foregroundStyle(.black)
+                                        .foregroundStyle(.white)
                                         .clipShape(.capsule)
                                     HStack(spacing: 6) {
                                         Text(primaryTypeLabel(for: finding))
@@ -1188,11 +1181,9 @@ struct ContentView: View {
             }
         } else {
             Image(systemName: "play.fill")
-                .foregroundStyle(.black)
 
             Text("Run Review")
                 .fontWeight(.bold)
-                .foregroundStyle(.black)
         }
     }
 
@@ -1526,6 +1517,65 @@ struct ContentView: View {
         ReviewOutputMode(rawValue: value.trimmingCharacters(in: .whitespacesAndNewlines)) ?? .full
     }
 
+	private var isDarkMode: Bool {
+		colorScheme == .dark
+	}
+
+    private var triggerHeroBackgroundGradient: LinearGradient {
+        let colors: [Color]
+        if isDarkMode {
+            colors = [
+                Color(red: 0.20, green: 0.10, blue: 0.04),
+                Color(red: 0.36, green: 0.17, blue: 0.06),
+                Color(red: 0.16, green: 0.07, blue: 0.03),
+            ]
+        } else {
+            colors = [
+                Color(red: 0.99, green: 0.97, blue: 0.94),
+                Color(red: 0.96, green: 0.91, blue: 0.84),
+                Color(red: 0.95, green: 0.93, blue: 0.89),
+            ]
+        }
+
+        return LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    private var triggerHeroOrbPrimaryColor: Color {
+        isDarkMode ? Color.white.opacity(0.08) : Color.white.opacity(0.6)
+    }
+
+    private var triggerHeroOrbAccentColor: Color {
+        isDarkMode ? Color.orange.opacity(0.22) : Color.orange.opacity(0.18)
+    }
+
+    private var triggerHeroTitleColor: Color {
+        isDarkMode ? .white : Color(red: 0.16, green: 0.11, blue: 0.08)
+    }
+
+    private var triggerHeroSubtitleColor: Color {
+        isDarkMode ? Color.white.opacity(0.85) : Color.black.opacity(0.72)
+    }
+
+    private var triggerSettingLabelColor: Color {
+        isDarkMode ? Color.white.opacity(0.72) : Color.black.opacity(0.62)
+    }
+
+    private var triggerCommandPreviewColor: Color {
+        isDarkMode ? Color.white.opacity(0.95) : Color.black.opacity(0.86)
+    }
+
+    private var triggerSettingsPanelBackgroundColor: Color {
+        isDarkMode ? Color.white.opacity(0.09) : Color.white.opacity(0.72)
+    }
+
+    private var triggerSettingsPanelBorderColor: Color {
+        isDarkMode ? Color.white.opacity(0.24) : Color.black.opacity(0.14)
+    }
+
+    private var triggerActionTintColor: Color {
+        isDarkMode ? Color(red: 0.92, green: 0.54, blue: 0.14) : Color(red: 0.70, green: 0.33, blue: 0.05)
+    }
+
     private var latestCLIUpdateCommand: String? {
         if let command = ReviewParser.parseCLIUpdateCommand(from: runner.rawOutput) {
             return command
@@ -1542,15 +1592,15 @@ struct ContentView: View {
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
                 .font(.system(size: 22, weight: .bold))
-                .foregroundStyle(Color.orange)
+                .foregroundStyle(triggerActionTintColor)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("CodeRabbit CLI update available")
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(triggerHeroTitleColor)
                 Text("Run `\(command)` before your next review.")
                     .font(.subheadline)
-                    .foregroundStyle(Color.white.opacity(0.9))
+                    .foregroundStyle(triggerHeroSubtitleColor)
             }
 
             Spacer(minLength: 0)
@@ -1560,15 +1610,15 @@ struct ContentView: View {
                 NSPasteboard.general.setString(command, forType: .string)
             }
             .buttonStyle(.borderedProminent)
-            .tint(Color.orange)
+            .tint(triggerActionTintColor)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.black.opacity(0.2))
+        .background(triggerSettingsPanelBackgroundColor)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.orange.opacity(0.7), lineWidth: 1.2)
+                .stroke(triggerActionTintColor.opacity(0.7), lineWidth: 1.2)
         )
     }
 
