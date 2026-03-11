@@ -33,6 +33,17 @@ private struct HistoryFolderGroup: Identifiable {
 	}
 }
 
+private struct FindingTypeCounts {
+	let potentialIssues: Int
+	let nitpicks: Int
+	let refactorSuggestions: Int
+	let uncategorized: Int
+
+	var categorizedTotal: Int {
+		potentialIssues + nitpicks + refactorSuggestions
+	}
+}
+
 struct ContentView: View {
 	@EnvironmentObject private var historyStore: ReviewHistoryStore
 
@@ -58,6 +69,7 @@ struct ContentView: View {
 	@State private var isLoadingGitBranches: Bool = false
 	@State private var gitBranchesRequestID: Int = 0
 	@State private var gitBranchLookupFailed: Bool = false
+	@State private var activeRunCommandPreview: String?
 	private let projectFolderBookmarkKey = ReviewRunner.projectFolderBookmarkKey
 	private let addWorkspaceOptionTag = "__add_workspace__"
 
@@ -123,19 +135,23 @@ struct ContentView: View {
 		}
 		.onChange(of: runner.completedRunID) { _, newValue in
 			guard let newValue else { return }
+			let trimmedActiveRunCommand = activeRunCommandPreview?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+			let persistedCommand = trimmedActiveRunCommand.isEmpty ? effectiveCommandPreview : trimmedActiveRunCommand
 			historyStore.add(
 				id: newValue,
 				createdAt: runner.currentRunStartedAt ?? Date(),
-				command: runner.command,
+				command: persistedCommand,
 				folderPath: runner.selectedFolderPath,
 				rawOutput: runner.rawOutput,
 				findings: runner.findings,
 				phases: runner.phases,
 				statusLabel: statusText
 			)
+			activeRunCommandPreview = nil
 		}
 		.onChange(of: runner.currentRunID) { _, newValue in
 			guard let newValue else { return }
+			activeRunCommandPreview = effectiveCommandPreview
 			selection = .history(newValue)
 			selectedHistoryTab = 0
 			collapsedHistoryFolders.remove(normalizedFolderPath(runner.selectedFolderPath))
@@ -265,7 +281,13 @@ struct ContentView: View {
 				VStack(spacing: 12) {
 					headerSection(title: "New Review", subtitle: statusText, subtitleColor: statusColor)
 					controlsSection
-					progressSection(phases: runner.phases, isRunning: isRunning, hasFailed: isLiveRunFailed)
+					reviewStatusCard(
+						phases: runner.phases,
+						findings: runner.findings,
+						rawOutput: runner.rawOutput,
+						isRunning: isRunning,
+						hasFailed: isLiveRunFailed
+					)
 					if let runErrorInfo = runner.runErrorInfo {
 						errorCard(errorInfo: runErrorInfo, nextAllowedRunAt: runner.nextAllowedRunAt)
 					} else if case let .failed(message) = runner.status {
@@ -429,7 +451,8 @@ struct ContentView: View {
 	}
 
 	private func historyDetailView(_ item: ReviewHistoryItem) -> some View {
-		VStack(spacing: 12) {
+		let itemFindings = resolvedFindings(for: item)
+		return VStack(spacing: 12) {
 			headerSection(
 				title: historyTitle(for: item),
 				subtitle: historySubtitle(for: item),
@@ -448,14 +471,20 @@ struct ContentView: View {
 			}
 			.frame(maxWidth: .infinity, alignment: .leading)
 
-			progressSection(phases: item.phases, isRunning: false, hasFailed: historyHasFailed(item))
+			reviewStatusCard(
+				phases: item.phases,
+				findings: itemFindings,
+				rawOutput: item.rawOutput,
+				isRunning: false,
+				hasFailed: historyHasFailed(item)
+			)
 			if let runErrorInfo = ReviewParser.parseRunErrorInfo(from: item.rawOutput) {
 				errorCard(errorInfo: runErrorInfo, nextAllowedRunAt: historyNextAllowedRunAt(for: runErrorInfo))
 			}
 			Divider()
 			resultsSection(
 				command: item.command,
-				findings: resolvedFindings(for: item),
+				findings: itemFindings,
 				rawOutput: item.rawOutput,
 				selectedTab: $selectedHistoryTab,
 				showsLoadingPlaceholder: runner.currentRunID == item.id
@@ -563,6 +592,169 @@ struct ContentView: View {
 			.frame(width: 210, alignment: .trailing)
 		}
 		.frame(maxWidth: .infinity, alignment: .leading)
+	}
+
+	@ViewBuilder
+	private func reviewStatusCard(
+		phases: [ReviewPhase],
+		findings _: [ReviewFinding],
+		rawOutput: String,
+		isRunning: Bool,
+		hasFailed: Bool
+	) -> some View {
+		if !shouldShowFindingsSummary(phases: phases, rawOutput: rawOutput, isRunning: isRunning, hasFailed: hasFailed) {
+			progressSection(phases: phases, isRunning: isRunning, hasFailed: hasFailed)
+		}
+	}
+
+	private func shouldShowFindingsSummary(
+		phases: [ReviewPhase],
+		rawOutput: String,
+		isRunning: Bool,
+		hasFailed: Bool
+	) -> Bool {
+		guard !isRunning, !hasFailed else { return false }
+		if ReviewParser.parseCompletionSummary(from: rawOutput) != nil {
+			return true
+		}
+		return phases.contains(.complete)
+	}
+
+	private func findingsSummaryCard(findings: [ReviewFinding]) -> some View {
+		let counts = findingTypeCounts(from: findings)
+		return VStack(alignment: .leading, spacing: 12) {
+			HStack(alignment: .firstTextBaseline) {
+				VStack(alignment: .leading, spacing: 2) {
+					Text("Findings Breakdown")
+						.font(.headline)
+					Text("Potential issues, nitpicks, and refactor suggestions")
+						.font(.caption)
+						.foregroundStyle(.secondary)
+				}
+				Spacer()
+				Text("\(findings.count)")
+					.font(.title2.weight(.bold))
+					.foregroundStyle(Color.accentColor)
+				Text("total")
+					.font(.caption.weight(.semibold))
+					.foregroundStyle(.secondary)
+			}
+
+			geometryDistributionBar(counts: counts)
+				.frame(height: 14)
+
+			HStack(spacing: 10) {
+				findingMetric(title: "Potential Issues", count: counts.potentialIssues, color: .orange, icon: "exclamationmark.triangle.fill")
+				findingMetric(title: "Nitpicks", count: counts.nitpicks, color: .blue, icon: "sparkles")
+				findingMetric(title: "Refactor Suggestions", count: counts.refactorSuggestions, color: .mint, icon: "arrow.triangle.2.circlepath")
+			}
+
+			if counts.uncategorized > 0 {
+				Text("\(counts.uncategorized) findings in other categories.")
+					.font(.caption2)
+					.foregroundStyle(.secondary)
+			}
+		}
+		.padding(14)
+		.frame(maxWidth: .infinity, alignment: .leading)
+		.background(
+			LinearGradient(
+				colors: [
+					Color.accentColor.opacity(0.12),
+					Color.orange.opacity(0.08),
+					Color.clear,
+				],
+				startPoint: .leading,
+				endPoint: .trailing
+			)
+		)
+		.clipShape(RoundedRectangle(cornerRadius: 12))
+		.overlay(overlayRoundedBorder(color: Color.accentColor.opacity(0.28)))
+	}
+
+	private func geometryDistributionBar(counts: FindingTypeCounts) -> some View {
+		GeometryReader { proxy in
+			let total = max(1, counts.categorizedTotal)
+			let width = proxy.size.width
+			let potentialWidth = width * CGFloat(counts.potentialIssues) / CGFloat(total)
+			let nitpickWidth = width * CGFloat(counts.nitpicks) / CGFloat(total)
+			let refactorWidth = width * CGFloat(counts.refactorSuggestions) / CGFloat(total)
+
+			HStack(spacing: 2) {
+				if counts.potentialIssues > 0 {
+					Rectangle()
+						.fill(Color.orange)
+						.frame(width: potentialWidth)
+				}
+				if counts.nitpicks > 0 {
+					Rectangle()
+						.fill(Color.blue)
+						.frame(width: nitpickWidth)
+				}
+				if counts.refactorSuggestions > 0 {
+					Rectangle()
+						.fill(Color.mint)
+						.frame(width: refactorWidth)
+				}
+			}
+			.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+		}
+		.background(Color.secondary.opacity(0.12))
+		.clipShape(Capsule())
+		.overlay(
+			Capsule()
+				.stroke(Color.primary.opacity(0.12), lineWidth: 1)
+		)
+	}
+
+	private func findingMetric(title: String, count: Int, color: Color, icon: String) -> some View {
+		VStack(alignment: .leading, spacing: 6) {
+			Label(title, systemImage: icon)
+				.font(.caption.weight(.semibold))
+				.foregroundStyle(.secondary)
+				.labelStyle(.titleAndIcon)
+			Text("\(count)")
+				.font(.title3.weight(.bold))
+				.foregroundStyle(color)
+		}
+		.padding(.vertical, 8)
+		.padding(.horizontal, 10)
+		.frame(maxWidth: .infinity, alignment: .leading)
+		.background(color.opacity(0.12))
+		.clipShape(RoundedRectangle(cornerRadius: 10))
+	}
+
+	private func findingTypeCounts(from findings: [ReviewFinding]) -> FindingTypeCounts {
+		var potentialIssues = 0
+		var nitpicks = 0
+		var refactorSuggestions = 0
+		var uncategorized = 0
+
+		for finding in findings {
+			let normalizedType = normalizedFindingType(for: finding)
+			if normalizedType.contains("potential_issue") {
+				potentialIssues += 1
+			} else if normalizedType.contains("nitpick") {
+				nitpicks += 1
+			} else if normalizedType.contains("refactor_suggestion") {
+				refactorSuggestions += 1
+			} else {
+				uncategorized += 1
+			}
+		}
+
+		return FindingTypeCounts(
+			potentialIssues: potentialIssues,
+			nitpicks: nitpicks,
+			refactorSuggestions: refactorSuggestions,
+			uncategorized: uncategorized
+		)
+	}
+
+	private func normalizedFindingType(for finding: ReviewFinding) -> String {
+		(finding.typeRaw ?? finding.typeDisplay)
+			.lowercased()
+			.replacingOccurrences(of: " ", with: "_")
 	}
 
 	private func progressSection(phases: [ReviewPhase], isRunning: Bool, hasFailed: Bool) -> some View {
@@ -715,6 +907,10 @@ struct ContentView: View {
 			if !findings.isEmpty {
 				ScrollView {
 					LazyVStack(spacing: 12) {
+						if !showsLoadingPlaceholder, completion != nil {
+							findingsSummaryCard(findings: findings)
+						}
+
 						ForEach(Array(findings.enumerated()), id: \.element.id) { index, finding in
 							VStack(alignment: .leading, spacing: 8) {
 								HStack(spacing: 16) {
