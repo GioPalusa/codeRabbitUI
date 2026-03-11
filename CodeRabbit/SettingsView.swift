@@ -75,9 +75,10 @@ struct SettingsView: View {
 
                 Section("Additional Instructions") {
                     if reviewConfigFiles.isEmpty {
-                        Text("No instruction files selected.")
+                        Text("No instruction files selected. \nAdditional instructions are files you can use with CodeRabbit AI (e.g.,claude.md, coderabbit.yaml)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     } else {
                         ForEach(reviewConfigFiles, id: \.self) { filePath in
                             HStack(spacing: 8) {

@@ -14,6 +14,53 @@ private enum ReviewSelection: Hashable {
     case history(UUID)
 }
 
+private extension View {
+    @ViewBuilder
+    func backgroundExtensionIfAvailable() -> some View {
+        if #available(macOS 26.0, *) {
+            self.backgroundExtensionEffect()
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder
+    func liquidGlassCard(cornerRadius: CGFloat, borderColor: Color, lineWidth: CGFloat = 1) -> some View {
+        if #available(macOS 26.0, *) {
+            self
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .stroke(borderColor, lineWidth: lineWidth)
+                )
+        } else {
+            background(.regularMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .stroke(borderColor, lineWidth: lineWidth)
+                )
+        }
+    }
+
+    @ViewBuilder
+    func liquidGlassField(cornerRadius: CGFloat, borderColor: Color, lineWidth: CGFloat = 1) -> some View {
+        if #available(macOS 26.0, *) {
+            self
+                .glassEffect(.clear, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .stroke(borderColor, lineWidth: lineWidth)
+                )
+        } else {
+            background(.thinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .stroke(borderColor, lineWidth: lineWidth)
+                )
+        }
+    }
+}
+
 private enum ReviewOutputMode: String {
     case full
     case promptOnly
@@ -23,6 +70,13 @@ private enum ComparisonBaseMode: String {
     case automatic
     case baseBranch
     case baseCommit
+}
+
+private enum SidebarPrimarySection: String, CaseIterable, Identifiable {
+    case newReview
+    case history
+
+    var id: String { rawValue }
 }
 
 private struct HistoryFolderGroup: Identifiable {
@@ -46,8 +100,8 @@ private struct FindingTypeCounts {
 }
 
 struct ContentView: View {
-	@EnvironmentObject private var historyStore: ReviewHistoryStore
-	@Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var historyStore: ReviewHistoryStore
+    @Environment(\.colorScheme) private var colorScheme
 
     @StateObject private var runner = ReviewRunner()
     @State private var selectedLiveTab: Int = 0
@@ -66,22 +120,37 @@ struct ContentView: View {
     @AppStorage("reviewConfigFilesJSON") private var reviewConfigFilesJSON: String = "[]"
     @AppStorage("selectedProjectFolderPath") private var selectedProjectFolderPath: String = ""
     @AppStorage("recentProjectFoldersJSON") private var recentProjectFoldersJSON: String = "[]"
+    @AppStorage("sidebarShowNewReview") private var sidebarShowNewReview: Bool = true
+    @AppStorage("sidebarShowHistory") private var sidebarShowHistory: Bool = true
+    @AppStorage("sidebarPrimarySection") private var sidebarPrimarySectionRaw: String = SidebarPrimarySection.newReview.rawValue
     @State private var recentProjectFolders: [String] = []
     @State private var gitBranches: [String] = []
     @State private var isLoadingGitBranches: Bool = false
     @State private var gitBranchesRequestID: Int = 0
     @State private var gitBranchLookupFailed: Bool = false
+    @State private var gitChangeSummary: GitChangeSummary?
+    @State private var isLoadingGitChangeSummary: Bool = false
+    @State private var gitChangeSummaryRequestID: Int = 0
     @State private var activeRunCommandPreview: String?
+    @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
     private let projectFolderBookmarkKey = ReviewRunner.projectFolderBookmarkKey
     private let addWorkspaceOptionTag = "__add_workspace__"
 
     var body: some View {
-        HStack(spacing: 0) {
+        NavigationSplitView(columnVisibility: $splitViewVisibility) {
             sidebarView
-            Divider()
+                .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 340)
+        } detail: {
             detailView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .backgroundExtensionIfAvailable()
         }
+        .navigationSplitViewStyle(.automatic)
         .onAppear {
+            sidebarPrimarySectionRaw = SidebarPrimarySection(rawValue: sidebarPrimarySectionRaw)?.rawValue ?? SidebarPrimarySection.newReview.rawValue
+            if !sidebarShowNewReview, !sidebarShowHistory {
+                sidebarShowHistory = true
+            }
             coderabbitExecutablePath = ReviewRunner.normalizeStoredExecutablePath(coderabbitExecutablePath)
             reviewOutputMode = normalizedReviewOutputMode(reviewOutputMode).rawValue
             comparisonBaseMode = normalizedComparisonBaseMode(comparisonBaseMode).rawValue
@@ -98,6 +167,7 @@ struct ContentView: View {
             runner.selectedFolderPath = selectedProjectFolderPath
             applyComparisonBaseToRunner()
             refreshGitBranches(for: selectedProjectFolderPath)
+            refreshGitChangeSummary(for: selectedProjectFolderPath)
             lastSelectedProjectFolderPath = selectedProjectFolderPath
             historyStore.purgeExpired()
             requestNotificationAuthorizationIfNeeded()
@@ -114,6 +184,7 @@ struct ContentView: View {
             runner.selectedFolderPath = newValue
             rememberProjectFolder(newValue)
             refreshGitBranches(for: newValue)
+            refreshGitChangeSummary(for: newValue)
             lastSelectedProjectFolderPath = newValue
         }
         .onChange(of: reviewOutputMode) { _, newValue in
@@ -126,15 +197,31 @@ struct ContentView: View {
         .onChange(of: comparisonBaseMode) { _, newValue in
             comparisonBaseMode = normalizedComparisonBaseMode(newValue).rawValue
             applyComparisonBaseToRunner()
+            refreshGitChangeSummary(for: selectedProjectFolderPath)
         }
         .onChange(of: comparisonBaseBranch) { _, _ in
             applyComparisonBaseToRunner()
+            refreshGitChangeSummary(for: selectedProjectFolderPath)
         }
         .onChange(of: comparisonBaseCommit) { _, _ in
             applyComparisonBaseToRunner()
+            refreshGitChangeSummary(for: selectedProjectFolderPath)
         }
         .onChange(of: reviewConfigFilesJSON) { _, _ in
             runner.configFiles = parsedReviewConfigFiles
+        }
+        .onChange(of: sidebarPrimarySectionRaw) { _, newValue in
+            sidebarPrimarySectionRaw = SidebarPrimarySection(rawValue: newValue)?.rawValue ?? SidebarPrimarySection.newReview.rawValue
+        }
+        .onChange(of: sidebarShowNewReview) { _, _ in
+            if !sidebarShowNewReview, !sidebarShowHistory {
+                sidebarShowHistory = true
+            }
+        }
+        .onChange(of: sidebarShowHistory) { _, _ in
+            if !sidebarShowNewReview, !sidebarShowHistory {
+                sidebarShowNewReview = true
+            }
         }
         .onChange(of: runner.completedRunID) { _, newValue in
             guard let newValue else { return }
@@ -168,103 +255,122 @@ struct ContentView: View {
 
     private var sidebarView: some View {
         List {
-            Button {
-                selection = .current
-                runner.prepareForNewReview()
-                selectedLiveTab = 0
-                expandedPromptKeys.removeAll()
-            } label: {
-                freshReviewButtonLabel
-            }
-            .buttonStyle(.plain)
-            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
-            .listRowBackground(Color.clear)
-
-            Section("History (30 days)") {
-                ForEach(groupedHistoryItems) { group in
-                    DisclosureGroup(
-                        isExpanded: isHistoryGroupExpandedBinding(for: group.folderPath),
-                        content: {
-                            ForEach(group.items) { item in
-                                let rowSelection: ReviewSelection = .history(item.id)
-                                let summary = historyListSummary(for: item)
-                                Button {
-                                    selection = rowSelection
-                                } label: {
-                                    HStack(alignment: .top, spacing: 8) {
-                                        Circle()
-                                            .fill(summary.color)
-                                            .frame(width: 8, height: 8)
-                                            .padding(.top, 4)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(historyTitle(for: item))
-                                                .lineLimit(1)
-                                            Text("\(summary.text) • \(Self.historyDateFormatter.string(from: item.createdAt))")
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                                .lineLimit(1)
-                                        }
-                                        Spacer(minLength: 0)
+            ForEach(sidebarSectionOrder) { section in
+                switch section {
+                case .newReview:
+                    if sidebarShowNewReview {
+                        Section("Review") {
+                            Button {
+                                selection = .current
+                                runner.prepareForNewReview()
+                                selectedLiveTab = 0
+                                expandedPromptKeys.removeAll()
+                            } label: {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Image(systemName: "square.and.pencil")
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text("New Review")
+                                            .font(.subheadline.weight(.semibold))
+                                        Text("Start a clean review run")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
                                     }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .contentShape(Rectangle())
+                                    Spacer(minLength: 0)
                                 }
-                                .buttonStyle(.plain)
-                                .listRowBackground(selection == rowSelection ? Color.accentColor.opacity(0.2) : Color.clear)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
                             }
-                        },
-                        label: {
-                            HStack(spacing: 6) {
-                                Text(historyFolderName(for: group.folderPath))
-                                    .lineLimit(1)
-                                Spacer(minLength: 0)
-                                Text("\(group.items.count)")
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.accentColor.opacity(0.12))
-                                    .clipShape(Capsule())
-                            }
+                            .buttonStyle(.plain)
+                            .contentShape(Rectangle())
+                            .listRowBackground(selection == .current ? Color.accentColor.opacity(0.2) : Color.clear)
                         }
-                    )
+                    }
+                case .history:
+                    if sidebarShowHistory {
+                        sidebarHistorySection
+                    }
                 }
             }
         }
-        .frame(minWidth: 280, idealWidth: 300, maxWidth: 320)
+        .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
     }
 
-    private var freshReviewButtonLabel: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(Color.accentColor.opacity(0.18))
-                    .frame(width: 28, height: 28)
-                Image(systemName: "square.and.pencil")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
-            }
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text("New Review")
-                    .font(.subheadline.weight(.semibold))
-                Text("Start a clean review run")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+    @ViewBuilder
+    private var sidebarHistorySection: some View {
+        Section("History") {
+            ForEach(groupedHistoryItems) { group in
+                DisclosureGroup(
+                    isExpanded: isHistoryGroupExpandedBinding(for: group.folderPath),
+                    content: {
+                        ForEach(group.items) { item in
+                            let rowSelection: ReviewSelection = .history(item.id)
+                            let summary = historyListSummary(for: item)
+                            Button {
+                                selection = rowSelection
+                            } label: {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Circle()
+                                        .fill(summary.color)
+                                        .frame(width: 8, height: 8)
+                                        .padding(.top, 4)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(historyTitle(for: item))
+                                            .lineLimit(1)
+                                        Text("\(summary.text) • \(Self.historyDateFormatter.string(from: item.createdAt))")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(selection == rowSelection ? Color.accentColor.opacity(0.2) : Color.clear)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .contentShape(Rectangle())
+                        }
+                    },
+                    label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder")
+                                .foregroundStyle(.secondary)
+                            Text(historyFolderName(for: group.folderPath))
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            Text("\(group.items.count)")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.accentColor.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+                    }
+                )
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.accentColor.opacity(selection == .current ? 0.18 : 0.08))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.accentColor.opacity(selection == .current ? 0.35 : 0.2), lineWidth: 1)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var sidebarPrimarySection: SidebarPrimarySection {
+        SidebarPrimarySection(rawValue: sidebarPrimarySectionRaw) ?? .newReview
+    }
+
+    private var sidebarSectionOrder: [SidebarPrimarySection] {
+        switch sidebarPrimarySection {
+        case .newReview:
+            return [.newReview, .history]
+        case .history:
+            return [.history, .newReview]
+        }
     }
 
     @ViewBuilder
@@ -344,11 +450,12 @@ struct ContentView: View {
 
             VStack {
                 Spacer()
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 14) {
                     Image("coderabbitlogo")
                         .resizable()
                         .scaledToFit()
-                        .frame(maxWidth: 600)
+                        .frame(maxWidth: 360)
+                        .shadow(color: triggerActionTintColor.opacity(0.2), radius: 8, x: 0, y: 4)
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Let's review your code!")
@@ -359,11 +466,13 @@ struct ContentView: View {
                             .foregroundStyle(triggerHeroSubtitleColor)
                     }
 
+                    changeSnapshotCard
+
                     if let updateCommand = latestCLIUpdateCommand {
                         cliUpdatePromptCard(command: updateCommand)
                     }
 
-                    VStack(spacing: 14) {
+                    VStack(spacing: 10) {
                         triggerSettingRow(title: "Project Folder") {
                             Picker("Project folder", selection: $selectedProjectFolderPath) {
                                 if availableProjectFolders.isEmpty {
@@ -411,13 +520,8 @@ struct ContentView: View {
                                 .textSelection(.enabled)
                         }
                     }
-                    .padding(16)
-                    .background(triggerSettingsPanelBackgroundColor)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(triggerSettingsPanelBorderColor, lineWidth: 1)
-                    )
+                    .padding(12)
+                    .liquidGlassCard(cornerRadius: 18, borderColor: triggerSettingsPanelBorderColor)
 
                     HStack {
                         Spacer()
@@ -446,12 +550,75 @@ struct ContentView: View {
     }
 
     private func triggerSettingRow<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .center, spacing: 10) {
             Text(title)
-                .font(.caption.weight(.semibold))
+                .font(.system(.caption, design: .monospaced).weight(.semibold))
                 .foregroundStyle(triggerSettingLabelColor)
+                .frame(width: 120, alignment: .leading)
+
             content()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .liquidGlassField(cornerRadius: 10, borderColor: triggerHeroInputBorderColor)
         }
+    }
+
+    @ViewBuilder
+    private var changeSnapshotCard: some View {
+        let trimmedFolderPath = selectedProjectFolderPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let folderLabel = trimmedFolderPath.isEmpty ? "No workspace selected" : trimmedFolderPath
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Text("repo:")
+                    .foregroundStyle(triggerSettingLabelColor)
+                Text(folderLabel)
+                    .foregroundStyle(triggerHeroTitleColor)
+                    .lineLimit(1)
+                if let summary = gitChangeSummary {
+                    Text("·")
+                        .foregroundStyle(triggerSettingLabelColor)
+                    Text(summary.currentRef)
+                        .foregroundStyle(triggerActionTintColor)
+                    Text("→")
+                        .foregroundStyle(triggerSettingLabelColor)
+                    Text(summary.comparedBaseRef)
+                        .foregroundStyle(triggerHeroSubtitleColor)
+                }
+            }
+            .font(.system(.subheadline, design: .monospaced))
+
+            if trimmedFolderPath.isEmpty {
+                Text("Pick a project folder to preview change stats.")
+                    .font(.caption)
+                    .foregroundStyle(triggerHeroSubtitleColor)
+            } else if isLoadingGitChangeSummary {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Analyzing working changes…")
+                        .font(.caption)
+                }
+                .foregroundStyle(triggerHeroSubtitleColor)
+            } else if let summary = gitChangeSummary {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("📁  \(summary.filesChanged) file\(summary.filesChanged == 1 ? "" : "s") changed")
+                    Text("├─ \(summary.addedFiles) added / \(summary.modifiedFiles) modified\(summary.otherFiles > 0 ? " / \(summary.otherFiles) other" : "")")
+                    Text("└─ +\(summary.insertions) insertions / -\(summary.deletions) deletions")
+                }
+                .font(.system(.title3, design: .monospaced))
+                .foregroundStyle(triggerHeroTitleColor)
+            } else {
+                Text("No diff stats available for this repository and base selection.")
+                    .font(.caption)
+                    .foregroundStyle(triggerHeroSubtitleColor)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlassCard(cornerRadius: 14, borderColor: triggerSettingsPanelBorderColor)
     }
 
     private func historyDetailView(_ item: ReviewHistoryItem) -> some View {
@@ -851,7 +1018,10 @@ struct ContentView: View {
         selectedTab: Binding<Int>,
         showsLoadingPlaceholder: Bool = false
     ) -> some View {
-        TabView(selection: selectedTab) {
+        let combinedAIAgentPrompt = findings.isEmpty ? nil : ReviewParser.combinedAIAgentPrompt(from: findings)
+        let shouldShowCombinedPromptTab = combinedAIAgentPrompt != nil
+
+        return TabView(selection: selectedTab) {
             findingsView(
                 command: command,
                 findings: findings,
@@ -864,6 +1034,27 @@ struct ContentView: View {
             rawOutputView(rawOutput: rawOutput)
                 .tabItem { Text("Raw Output") }
                 .tag(1)
+
+            if let combinedAIAgentPrompt {
+                combinedPromptView(
+                    prompt: combinedAIAgentPrompt,
+                    sourceCount: findings.compactMap(\.aiPrompt).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count,
+                    shouldAutoExpandInPromptOnly: commandContainsFlag(command, long: "--prompt-only"),
+                    forceExpanded: selectedTab.wrappedValue == 2
+                )
+                .tabItem { Text("AI Agent Prompt") }
+                .tag(2)
+            }
+        }
+        .onAppear {
+            if !shouldShowCombinedPromptTab, selectedTab.wrappedValue == 2 {
+                selectedTab.wrappedValue = 0
+            }
+        }
+        .onChange(of: shouldShowCombinedPromptTab) { _, isShown in
+            if !isShown, selectedTab.wrappedValue == 2 {
+                selectedTab.wrappedValue = 0
+            }
         }
     }
 
@@ -872,8 +1063,6 @@ struct ContentView: View {
         let hasNoFindingsResult = completion?.hasNoFindings == true
         let hasAnyOutput = !rawOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let shouldAutoExpandAgentPrompts = commandContainsFlag(command, long: "--prompt-only")
-        let combinedAIAgentPrompt = ReviewParser.combinedAIAgentPrompt(from: findings)
-        let aiPromptCount = findings.compactMap(\.aiPrompt).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
         return VStack(alignment: .leading, spacing: 8) {
             if findings.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -1021,13 +1210,6 @@ struct ContentView: View {
                             )
                         }
 
-                        if let combinedAIAgentPrompt {
-                            combinedPromptCard(
-                                prompt: combinedAIAgentPrompt,
-                                sourceCount: aiPromptCount,
-                                shouldAutoExpand: shouldAutoExpandAgentPrompts
-                            )
-                        }
                     }
                     .padding(.vertical, 2)
                 }
@@ -1036,8 +1218,33 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private func combinedPromptCard(prompt: String, sourceCount: Int, shouldAutoExpand: Bool) -> some View {
+    private func combinedPromptView(
+        prompt: String,
+        sourceCount: Int,
+        shouldAutoExpandInPromptOnly: Bool,
+        forceExpanded: Bool
+    ) -> some View {
+        ScrollView {
+            combinedPromptCard(
+                prompt: prompt,
+                sourceCount: sourceCount,
+                shouldAutoExpandInPromptOnly: shouldAutoExpandInPromptOnly,
+                forceExpanded: forceExpanded
+            )
+            .padding(.vertical, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func combinedPromptCard(
+        prompt: String,
+        sourceCount: Int,
+        shouldAutoExpandInPromptOnly: Bool,
+        forceExpanded: Bool
+    ) -> some View {
         let key = combinedPromptKey(for: prompt)
+        let isExpanded = shouldAutoExpandInPromptOnly || forceExpanded || isPromptExpanded(forKey: key)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "rectangle.stack.badge.person.crop.fill")
@@ -1054,7 +1261,7 @@ struct ContentView: View {
                     .clipShape(Capsule())
             }
 
-            if shouldAutoExpand {
+            if shouldAutoExpandInPromptOnly {
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.down")
                         .font(.caption2)
@@ -1063,7 +1270,7 @@ struct ContentView: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            } else {
+            } else if !forceExpanded {
                 Button {
                     togglePrompt(forKey: key)
                 } label: {
@@ -1077,7 +1284,7 @@ struct ContentView: View {
                 .buttonStyle(.plain)
             }
 
-            if shouldAutoExpand || isPromptExpanded(forKey: key) {
+            if isExpanded {
                 VStack(alignment: .leading, spacing: 8) {
                     codeBlock(prompt)
                     Button("Copy Combined Prompt") {
@@ -1517,9 +1724,9 @@ struct ContentView: View {
         ReviewOutputMode(rawValue: value.trimmingCharacters(in: .whitespacesAndNewlines)) ?? .full
     }
 
-	private var isDarkMode: Bool {
-		colorScheme == .dark
-	}
+    private var isDarkMode: Bool {
+        colorScheme == .dark
+    }
 
     private var triggerHeroBackgroundGradient: LinearGradient {
         let colors: [Color]
@@ -1564,12 +1771,12 @@ struct ContentView: View {
         isDarkMode ? Color.white.opacity(0.95) : Color.black.opacity(0.86)
     }
 
-    private var triggerSettingsPanelBackgroundColor: Color {
-        isDarkMode ? Color.white.opacity(0.09) : Color.white.opacity(0.72)
-    }
-
     private var triggerSettingsPanelBorderColor: Color {
         isDarkMode ? Color.white.opacity(0.24) : Color.black.opacity(0.14)
+    }
+
+    private var triggerHeroInputBorderColor: Color {
+        isDarkMode ? Color.white.opacity(0.18) : Color.black.opacity(0.10)
     }
 
     private var triggerActionTintColor: Color {
@@ -1614,12 +1821,7 @@ struct ContentView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(triggerSettingsPanelBackgroundColor)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(triggerActionTintColor.opacity(0.7), lineWidth: 1.2)
-        )
+        .liquidGlassCard(cornerRadius: 14, borderColor: triggerActionTintColor.opacity(0.7), lineWidth: 1.2)
     }
 
     private func requestNotificationAuthorizationIfNeeded() {
@@ -1697,6 +1899,42 @@ struct ContentView: View {
         }
     }
 
+    private func selectedBaseReferenceForSummary() -> String? {
+        switch normalizedComparisonBaseMode(comparisonBaseMode) {
+        case .automatic:
+            return nil
+        case .baseBranch:
+            let value = comparisonBaseBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.isEmpty ? nil : value
+        case .baseCommit:
+            let value = comparisonBaseCommit.trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.isEmpty ? nil : value
+        }
+    }
+
+    private func refreshGitChangeSummary(for folderPath: String) {
+        let trimmedFolderPath = folderPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedFolderPath.isEmpty else {
+            gitChangeSummary = nil
+            isLoadingGitChangeSummary = false
+            return
+        }
+
+        gitChangeSummaryRequestID += 1
+        let requestID = gitChangeSummaryRequestID
+        isLoadingGitChangeSummary = true
+        let baseRef = selectedBaseReferenceForSummary()
+
+        Task {
+            let summary = await runner.loadGitChangeSummary(in: trimmedFolderPath, baseRef: baseRef)
+            await MainActor.run {
+                guard requestID == gitChangeSummaryRequestID else { return }
+                isLoadingGitChangeSummary = false
+                gitChangeSummary = summary
+            }
+        }
+    }
+
     private func refreshGitBranches(for folderPath: String) {
         let trimmedFolderPath = folderPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedFolderPath.isEmpty else {
@@ -1738,7 +1976,7 @@ struct ContentView: View {
             set: { comparisonBaseMode = $0.rawValue }
         )
 
-        VStack {
+        HStack {
             if isTriggerLayout {
                 Picker("Comparison base", selection: modeBinding) {
                     Text("Default").tag(ComparisonBaseMode.automatic)
@@ -1777,6 +2015,7 @@ struct ContentView: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
+                    .padding(.leading)
                 } else {
                     TextField("main", text: $comparisonBaseBranch)
                         .textFieldStyle(.roundedBorder)

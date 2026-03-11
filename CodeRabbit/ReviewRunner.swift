@@ -2,6 +2,20 @@ import Foundation
 import Combine
 import Darwin
 
+struct GitChangeSummary {
+	let currentRef: String
+	let comparedBaseRef: String
+	let filesChanged: Int
+	let addedFiles: Int
+	let modifiedFiles: Int
+	let insertions: Int
+	let deletions: Int
+
+	var otherFiles: Int {
+		max(0, filesChanged - addedFiles - modifiedFiles)
+	}
+}
+
 @MainActor
 final class ReviewRunner: ObservableObject {
 	@Published var command: String = ReviewRunner.defaultCommand()
@@ -548,6 +562,124 @@ final class ReviewRunner: ObservableObject {
 					continuation.resume(returning: nil)
 				}
 			}
+		}
+	}
+
+	func loadGitChangeSummary(in folderPath: String, baseRef: String?) async -> GitChangeSummary? {
+		let trimmedPath = folderPath.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !trimmedPath.isEmpty else { return nil }
+
+		return await withCheckedContinuation { (continuation: CheckedContinuation<GitChangeSummary?, Never>) in
+			DispatchQueue.global(qos: .userInitiated).async {
+				let currentRefOutput = self.runGitCommand(
+					arguments: ["rev-parse", "--abbrev-ref", "HEAD"],
+					folderPath: trimmedPath
+				)
+				guard currentRefOutput.exitCode == 0 else {
+					continuation.resume(returning: nil)
+					return
+				}
+				let currentRef = currentRefOutput.output.trimmingCharacters(in: .whitespacesAndNewlines)
+				guard !currentRef.isEmpty else {
+					continuation.resume(returning: nil)
+					return
+				}
+
+				let normalizedBaseRef = baseRef?.trimmingCharacters(in: .whitespacesAndNewlines)
+				let nonEmptyBaseRef = (normalizedBaseRef?.isEmpty == false) ? normalizedBaseRef : nil
+				let diffTarget: [String]
+				let baseLabel: String
+				if let nonEmptyBaseRef {
+					diffTarget = ["\(nonEmptyBaseRef)...HEAD"]
+					baseLabel = nonEmptyBaseRef
+				} else {
+					diffTarget = ["HEAD"]
+					baseLabel = "working tree"
+				}
+
+				let numstatOutput = self.runGitCommand(
+					arguments: ["diff", "--numstat"] + diffTarget,
+					folderPath: trimmedPath
+				)
+				guard numstatOutput.exitCode == 0 else {
+					continuation.resume(returning: nil)
+					return
+				}
+
+				let nameStatusOutput = self.runGitCommand(
+					arguments: ["diff", "--name-status"] + diffTarget,
+					folderPath: trimmedPath
+				)
+				guard nameStatusOutput.exitCode == 0 else {
+					continuation.resume(returning: nil)
+					return
+				}
+
+				let numstatLines = numstatOutput.output
+					.split(whereSeparator: \.isNewline)
+					.map(String.init)
+					.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+				let nameStatusLines = nameStatusOutput.output
+					.split(whereSeparator: \.isNewline)
+					.map(String.init)
+					.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+				var insertions = 0
+				var deletions = 0
+				for line in numstatLines {
+					let columns = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+					guard columns.count >= 2 else { continue }
+					if let added = Int(columns[0]) {
+						insertions += added
+					}
+					if let deleted = Int(columns[1]) {
+						deletions += deleted
+					}
+				}
+
+				var addedFiles = 0
+				var modifiedFiles = 0
+				for line in nameStatusLines {
+					let columns = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+					guard let statusToken = columns.first?.uppercased(), !statusToken.isEmpty else { continue }
+					if statusToken.hasPrefix("A") {
+						addedFiles += 1
+					} else if statusToken.hasPrefix("M") || statusToken.hasPrefix("R") || statusToken.hasPrefix("C") {
+						modifiedFiles += 1
+					}
+				}
+
+				let summary = GitChangeSummary(
+					currentRef: currentRef,
+					comparedBaseRef: baseLabel,
+					filesChanged: numstatLines.count,
+					addedFiles: addedFiles,
+					modifiedFiles: modifiedFiles,
+					insertions: insertions,
+					deletions: deletions
+				)
+				continuation.resume(returning: summary)
+			}
+		}
+	}
+
+	private func runGitCommand(arguments: [String], folderPath: String) -> (output: String, exitCode: Int32) {
+		let process = Process()
+		process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+		process.arguments = arguments
+		process.currentDirectoryURL = URL(fileURLWithPath: folderPath)
+		let outputPipe = Pipe()
+		process.standardOutput = outputPipe
+		process.standardError = Pipe()
+
+		do {
+			try process.run()
+			process.waitUntilExit()
+			let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+			let output = String(data: outputData, encoding: .utf8) ?? ""
+			return (output, process.terminationStatus)
+		} catch {
+			return ("", 1)
 		}
 	}
 }
