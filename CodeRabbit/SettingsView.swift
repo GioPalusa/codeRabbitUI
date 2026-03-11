@@ -5,10 +5,14 @@ struct SettingsView: View {
 	@EnvironmentObject private var historyStore: ReviewHistoryStore
 	@AppStorage("coderabbitExecutablePath") private var coderabbitExecutablePath: String = ReviewRunner.defaultExecutablePath()
 	@AppStorage("reviewConfigFilesJSON") private var reviewConfigFilesJSON: String = "[]"
+	@AppStorage("selectedProjectFolderPath") private var selectedProjectFolderPath: String = ""
+	@AppStorage("recentProjectFoldersJSON") private var recentProjectFoldersJSON: String = "[]"
 	@State private var showClearHistoryConfirmation = false
+	@State private var showClearProjectFoldersConfirmation = false
 	@State private var reviewConfigFiles: [String] = []
 	@State private var cliLookupStatus: String?
 	private let executableBookmarkKey = "coderabbitExecutableBookmark"
+	private let projectFolderBookmarkKey = ReviewRunner.projectFolderBookmarkKey
 	private let installCommand = "curl -fsSL https://cli.coderabbit.ai/install.sh | sh"
 
 	var body: some View {
@@ -93,6 +97,17 @@ struct SettingsView: View {
 					.foregroundStyle(.red)
 					.padding(.bottom)
 				}
+
+				Section("Project Folders") {
+					Text("Clears the recent folder list and selected workspace.")
+						.font(.caption)
+						.foregroundStyle(.secondary)
+					Button("Clear Project Folder List") {
+						showClearProjectFoldersConfirmation = true
+					}
+					.foregroundStyle(.red)
+					.padding(.bottom)
+				}
 			}
 
 			Divider()
@@ -124,6 +139,14 @@ struct SettingsView: View {
 			}
 		} message: {
 			Text("This removes all saved review posts from local history.")
+		}
+		.alert("Clear saved project folders?", isPresented: $showClearProjectFoldersConfirmation) {
+			Button("Cancel", role: .cancel) {}
+			Button("Clear", role: .destructive) {
+				clearSavedProjectFolders()
+			}
+		} message: {
+			Text("This removes the recent project folder list and current selection.")
 		}
 		.onAppear {
 			coderabbitExecutablePath = ReviewRunner.normalizeStoredExecutablePath(coderabbitExecutablePath)
@@ -259,8 +282,14 @@ struct SettingsView: View {
 
 	private func saveReviewConfigFiles() {
 		guard let data = try? JSONEncoder().encode(reviewConfigFiles),
-			  let encoded = String(data: data, encoding: .utf8)
+		      let encoded = String(data: data, encoding: .utf8)
 		else { return }
 		reviewConfigFilesJSON = encoded
+	}
+
+	private func clearSavedProjectFolders() {
+		recentProjectFoldersJSON = "[]"
+		selectedProjectFolderPath = ""
+		UserDefaults.standard.removeObject(forKey: projectFolderBookmarkKey)
 	}
 }
