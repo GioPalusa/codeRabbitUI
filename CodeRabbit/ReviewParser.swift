@@ -197,6 +197,7 @@ enum ReviewParser {
             || line.hasPrefix("Review completed:")
             || line.hasPrefix("Failed to start review:")
             || lowered.hasPrefix("[error]")
+            || lowered.contains("review error:")
             || lowered.contains("rate limit exceeded")
     }
 
@@ -471,21 +472,90 @@ enum ReviewParser {
             )
         }
 
+        // Prefer explicit review error details over generic startup failures.
+        for raw in lines.reversed() {
+            let line = sanitizeLineForParsing(raw)
+            guard !line.isEmpty else { continue }
+            guard let parsedMessage = parseExplicitReviewErrorMessage(from: line) else { continue }
+
+            return ReviewRunErrorInfo(
+                message: normalizeRunErrorMessage(parsedMessage),
+                isRateLimit: false,
+                retryAfter: nil,
+                retryAfterSeconds: nil,
+                occurredAt: parseTimestamp(from: line),
+                rawLine: line
+            )
+        }
+
         for raw in lines.reversed() {
             let line = sanitizeLineForParsing(raw)
             guard !line.isEmpty else { continue }
 
             if line.hasPrefix("Failed to start review:") {
                 let message = String(line.dropFirst("Failed to start review:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
-                return ReviewRunErrorInfo(message: message, isRateLimit: false, retryAfter: nil, retryAfterSeconds: nil, occurredAt: parseTimestamp(from: line), rawLine: line)
+                return ReviewRunErrorInfo(
+                    message: normalizeRunErrorMessage(message),
+                    isRateLimit: false,
+                    retryAfter: nil,
+                    retryAfterSeconds: nil,
+                    occurredAt: parseTimestamp(from: line),
+                    rawLine: line
+                )
             }
+        }
+
+        for raw in lines.reversed() {
+            let line = sanitizeLineForParsing(raw)
+            guard !line.isEmpty else { continue }
 
             if line.lowercased().hasPrefix("[error]") {
-                return ReviewRunErrorInfo(message: line, isRateLimit: false, retryAfter: nil, retryAfterSeconds: nil, occurredAt: parseTimestamp(from: line), rawLine: line)
+                return ReviewRunErrorInfo(
+                    message: normalizeRunErrorMessage(line),
+                    isRateLimit: false,
+                    retryAfter: nil,
+                    retryAfterSeconds: nil,
+                    occurredAt: parseTimestamp(from: line),
+                    rawLine: line
+                )
             }
         }
 
         return nil
+    }
+
+    private static func parseExplicitReviewErrorMessage(from line: String) -> String? {
+        let lowered = line.lowercased()
+        guard lowered.contains("review error:") else { return nil }
+
+        var cleaned = line
+        if let closingBracket = cleaned.firstIndex(of: "]"), cleaned.hasPrefix("[") {
+            cleaned = String(cleaned[cleaned.index(after: closingBracket)...]).trimmingCharacters(in: .whitespaces)
+        }
+
+        cleaned = cleaned.replacingOccurrences(of: "❌ REVIEW ERROR:", with: "", options: [.caseInsensitive])
+        cleaned = cleaned.replacingOccurrences(of: "REVIEW ERROR:", with: "", options: [.caseInsensitive])
+        cleaned = cleaned.replacingOccurrences(of: "❌", with: "", options: [])
+
+        let message = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        return message.isEmpty ? nil : message
+    }
+
+    private static func normalizeRunErrorMessage(_ message: String) -> String {
+        var normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let prefixRange = normalized.range(of: "review failed:", options: [.caseInsensitive, .anchored]) {
+            let suffix = String(normalized[prefixRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !suffix.isEmpty {
+                normalized = suffix
+            }
+        }
+
+        if normalized.lowercased().contains("no files found for review") {
+            return "No files found for review. Make a code change or choose a different comparison base, then run again."
+        }
+
+        return normalized
     }
 
     private static func isExplicitRateLimitErrorLine(_ line: String) -> Bool {
@@ -692,6 +762,7 @@ enum ReviewParser {
     private static func isTerminalReviewLine(_ line: String) -> Bool {
         line.hasPrefix("Review completed:")
             || line.hasPrefix("Failed to start review:")
+            || line.lowercased().contains("review error:")
             || line.lowercased().hasPrefix("[error]")
     }
 

@@ -87,6 +87,28 @@ final class ReviewParserPlainTextTests: XCTestCase {
         XCTAssertEqual(failure, "Rate limit exceeded, please try after 1 minutes and 52 seconds")
     }
 
+    func testParseRunErrorInfoPrefersDetailedNoFilesReviewError() {
+        let input = """
+        Starting CodeRabbit review in plain text mode...
+        Connecting to review service
+        Setting up
+        [2026-03-12T19:45:52.522Z] ❌ REVIEW ERROR: Review failed: No files found for review
+        Failed to start review: Review failed
+        [error] stopping cli
+        """
+
+        let info = ReviewParser.parseRunErrorInfo(from: input)
+        XCTAssertEqual(info?.isRateLimit, false)
+        XCTAssertEqual(
+            info?.message,
+            "No files found for review. Make a code change or choose a different comparison base, then run again."
+        )
+        XCTAssertEqual(
+            ReviewParser.parseRunFailureMessage(from: input),
+            "No files found for review. Make a code change or choose a different comparison base, then run again."
+        )
+    }
+
     func testTimestampedRateLimitErrorWinsOverStoppingCliLine() {
         let input = """
         Starting CodeRabbit review in plain text mode...
