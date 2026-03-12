@@ -18,6 +18,9 @@ struct ContentView: View {
     @State var selectedHistoryTab: Int = 0
     @State var expandedPromptKeys: Set<String> = []
     @State var collapsedHistoryFolders: Set<String> = []
+    @State var sidebarShowsAllHistoryItems: Bool = false
+    @State var clearProjectHistoryFolderPath: String = ""
+    @State var showClearProjectHistoryConfirmation: Bool = false
     @State var lastSelectedProjectFolderPath: String = ""
     @State var forceShowNewReviewTriggerPage: Bool = false
     @State var selection: ReviewSelection? = .current
@@ -31,6 +34,7 @@ struct ContentView: View {
     @AppStorage("reviewConfigFilesJSON") var reviewConfigFilesJSON: String = "[]"
     @AppStorage("selectedProjectFolderPath") var selectedProjectFolderPath: String = ""
     @AppStorage("recentProjectFoldersJSON") var recentProjectFoldersJSON: String = "[]"
+    @AppStorage("appAutoCheckForUpdates") var appAutoCheckForUpdates: Bool = true
     @AppStorage("sidebarShowNewReview") var sidebarShowNewReview: Bool = true
     @AppStorage("sidebarShowHistory") var sidebarShowHistory: Bool = true
     @AppStorage("sidebarPrimarySection") var sidebarPrimarySectionRaw: String = SidebarPrimarySection.newReview.rawValue
@@ -44,6 +48,8 @@ struct ContentView: View {
     @State var gitChangeSummaryRequestID: Int = 0
     @State var activeRunCommandPreview: String?
     @State var splitViewVisibility: NavigationSplitViewVisibility = .all
+    @State var appUpdateInfo: AppUpdateInfo?
+    @State var hasAutoCheckedForAppUpdateThisLaunch: Bool = false
     let projectFolderBookmarkKey = ReviewRunner.projectFolderBookmarkKey
     let addWorkspaceOptionTag = "__add_workspace__"
 
@@ -56,7 +62,6 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationSplitViewStyle(.automatic)
-        .toolbar(.hidden, for: .windowToolbar)
         .onAppear {
             runner.recoverInterruptedRunIfNeeded()
             sidebarPrimarySectionRaw = SidebarPrimarySection(rawValue: sidebarPrimarySectionRaw)?.rawValue ?? SidebarPrimarySection.newReview.rawValue
@@ -84,6 +89,10 @@ struct ContentView: View {
             historyStore.purgeExpired()
             runner.restoreRateLimitCooldown(from: historyStore.items)
             requestNotificationAuthorizationIfNeeded()
+            if appAutoCheckForUpdates, !hasAutoCheckedForAppUpdateThisLaunch {
+                hasAutoCheckedForAppUpdateThisLaunch = true
+                checkForAppUpdate()
+            }
         }
         .onChange(of: coderabbitExecutablePath) { _, newValue in
             runner.executablePathOverride = newValue
@@ -169,6 +178,18 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             runner.recoverInterruptedRunIfNeeded()
+        }
+        .confirmationDialog(
+            "Clear project history?",
+            isPresented: $showClearProjectHistoryConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Clear History", role: .destructive) {
+                clearPendingProjectHistory()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Remove all saved reviews for \(historyFolderName(for: clearProjectHistoryFolderPath)) from local history.")
         }
     }
 }

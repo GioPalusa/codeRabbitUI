@@ -80,6 +80,14 @@ final class ReviewHistoryStore: ObservableObject {
         save()
     }
 
+    func clearHistory(forFolderPath folderPath: String) {
+        let normalizedTargetPath = normalizedFolderPath(folderPath)
+        let filtered = items.filter { normalizedFolderPath($0.folderPath) != normalizedTargetPath }
+        guard filtered.count != items.count else { return }
+        items = filtered
+        save()
+    }
+
     func purgeExpired(referenceDate: Date = Date()) {
         let cutoff = Calendar.current.date(byAdding: .day, value: -retentionDays, to: referenceDate) ?? referenceDate
         let filtered = items.filter { $0.createdAt >= cutoff }
@@ -121,5 +129,10 @@ final class ReviewHistoryStore: ObservableObject {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
         return appSupport.appendingPathComponent("CodeRabbit", isDirectory: true)
+    }
+
+    private func normalizedFolderPath(_ folderPath: String) -> String {
+        let trimmed = folderPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "/" : trimmed
     }
 }

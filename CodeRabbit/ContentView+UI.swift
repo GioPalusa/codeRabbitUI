@@ -62,39 +62,40 @@ extension ContentView {
                 DisclosureGroup(
                     isExpanded: isHistoryGroupExpandedBinding(for: group.folderPath),
                     content: {
-                        ForEach(group.items) { item in
-                            let rowSelection: ReviewSelection = .history(item.id)
-                            let summary = historyListSummary(for: item)
-                            Button {
-                                selection = rowSelection
-                            } label: {
-                                HStack(alignment: .top, spacing: 8) {
-                                    Circle()
-                                        .fill(summary.color)
-                                        .frame(width: 8, height: 8)
-                                        .padding(.top, 4)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(historyTitle(for: item))
-                                            .lineLimit(1)
-                                        Text("\(summary.text) • \(Self.historyDateFormatter.string(from: item.createdAt))")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
+                        VStack(spacing: 0) {
+                            ForEach(group.items) { item in
+                                let rowSelection: ReviewSelection = .history(item.id)
+                                let summary = historyListSummary(for: item)
+                                Button {
+                                    selection = rowSelection
+                                } label: {
+                                    HStack(alignment: .top, spacing: 8) {
+                                        Circle()
+                                            .fill(summary.color)
+                                            .frame(width: 8, height: 8)
+                                            .padding(.top, 4)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(historyTitle(for: item))
+                                                .lineLimit(1)
+                                            Text("\(summary.text) • \(Self.historyDateFormatter.string(from: item.createdAt))")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                        }
+                                        Spacer(minLength: 0)
                                     }
-                                    Spacer(minLength: 0)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .fill(selection == rowSelection ? Color.accentColor.opacity(0.2) : Color.clear)
+                                    )
                                 }
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 6)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .buttonStyle(.plain)
                                 .contentShape(Rectangle())
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .fill(selection == rowSelection ? Color.accentColor.opacity(0.2) : Color.clear)
-                                )
                             }
-                            .buttonStyle(.plain)
-                            .contentShape(Rectangle())
                         }
+                        .clipped()
                     },
                     label: {
                         HStack(spacing: 6) {
@@ -103,16 +104,41 @@ extension ContentView {
                             Text(historyFolderName(for: group.folderPath))
                                 .lineLimit(1)
                             Spacer(minLength: 0)
-                            Text("\(group.items.count)")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.accentColor.opacity(0.12))
-                                .clipShape(Capsule())
+                            Menu {
+                                Button(role: .destructive) {
+                                    promptClearHistory(for: group.folderPath)
+                                } label: {
+                                    Label("Clear", systemImage: "trash")
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                                    .symbolRenderingMode(.monochrome)
+                                    .foregroundStyle(Color(nsColor: .labelColor))
+                            }
+                            .menuStyle(.borderlessButton)
+                            .menuIndicator(.hidden)
+                            .tint(Color(nsColor: .labelColor))
+                            .zIndex(1)
                         }
                     }
                 )
+                .clipped()
+            }
+
+            if canShowMoreSidebarHistory {
+                Button {
+                    sidebarShowsAllHistoryItems = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.down.circle.fill")
+                            .foregroundStyle(Color.accentColor)
+                        Text("Show \(hiddenSidebarHistoryCount) more")
+                            .font(.caption.weight(.semibold))
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -227,6 +253,10 @@ extension ContentView {
 
                     changeSnapshotCard
 
+                    if let appUpdateInfo {
+                        appUpdatePromptCard(updateInfo: appUpdateInfo)
+                    }
+
                     if let updateCommand = latestCLIUpdateCommand {
                         cliUpdatePromptCard(command: updateCommand)
                     }
@@ -296,14 +326,6 @@ extension ContentView {
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            SettingsLink {
-                Image(systemName: "gearshape.fill")
-                    .foregroundStyle(triggerHeroTitleColor)
-            }
-            .padding(.top, 20)
-            .padding(.trailing, 20)
-            .buttonStyle(.plain)
         }
         .frame(minWidth: 760, minHeight: 680)
     }
@@ -383,11 +405,7 @@ extension ContentView {
     func historyDetailView(_ item: ReviewHistoryItem) -> some View {
         let itemFindings = resolvedFindings(for: item)
         return VStack(spacing: 12) {
-            headerSection(
-                title: historyTitle(for: item),
-                subtitle: historySubtitle(for: item),
-                subtitleColor: historyStatusColor(historyStatusLabel(for: item))
-            )
+            historyHeaderSection(item)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Folder: \(item.folderPath)")
@@ -446,11 +464,21 @@ extension ContentView {
                     .foregroundStyle(subtitleColor)
                     .font(.subheadline)
             }
-            Spacer()
-            SettingsLink {
-                Image(systemName: "gearshape.fill")
+        }
+    }
+
+    func historyHeaderSection(_ item: ReviewHistoryItem) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(historyTitle(for: item))
+                    .font(.title2)
+                    .bold()
+                    .foregroundStyle(Color.accentColor)
+                Text(historySubtitle(for: item))
+                    .foregroundStyle(historyStatusColor(historyStatusLabel(for: item)))
+                    .font(.subheadline)
             }
-            .buttonStyle(.plain)
+            Spacer()
         }
     }
 

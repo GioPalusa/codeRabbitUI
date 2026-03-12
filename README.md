@@ -1,83 +1,70 @@
-# CodeRabbit macOS Review App (MVP)
+# CodeRabbit for macOS
 
-A native macOS SwiftUI app that runs CodeRabbit CLI reviews on any selected project folder.
+[![Latest Release](https://img.shields.io/github/v/release/GioPalusa/codeRabbitUI)](https://github.com/GioPalusa/codeRabbitUI/releases)
+[![Open Issues](https://img.shields.io/github/issues/GioPalusa/codeRabbitUI)](https://github.com/GioPalusa/codeRabbitUI/issues)
+[![Platform](https://img.shields.io/badge/platform-macOS-black)](https://www.apple.com/macos/)
 
-## What it does
+Run CodeRabbit reviews from a fast native macOS app instead of juggling terminal commands.
 
-- Pick a project folder.
-- Run CodeRabbit reviews with selectable output mode:
+CodeRabbit for macOS is built for developers who want:
+
+- A clean review workflow with less setup friction
+- Live progress and readable findings in one place
+- Quick handoff prompts for AI coding agents
+- Release updates directly from GitHub
+
+## Why Use It
+
+- Native macOS UX for CodeRabbit CLI workflows
+- Real-time run phases: `Starting -> Connecting -> Setting up -> Analyzing -> Reviewing`
+- Structured output: findings, comments, proposed fixes, and AI prompts
+- Fast mode switching:
   - Full detailed review (`review --plain`)
-  - Token-efficient prompts only (`review --prompt-only`)
-- Resolve `coderabbit` executable portably by trying:
-  - Optional executable override from UI
-  - `which coderabbit`
-  - Common install paths (`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`)
-- Stream CLI stdout/stderr live into the app.
-- Parse output into structured findings with CodeRabbit type labels, comments, proposed diff fixes, and AI prompts.
-- Show review progress by phase (Starting, Connecting, Setting up, Analyzing, Reviewing, Complete).
-- Keep a local review history sidebar where each completed review is stored as one post for 30 days.
+  - AI-agent-only output (`review --prompt-only`)
+- Local review history (30-day retention)
+- In-app checks for app and CLI updates
+
+## Get Started (2 Minutes)
+
+1. Download the latest app from [GitHub Releases](https://github.com/GioPalusa/codeRabbitUI/releases).
+2. Move `CodeRabbit.app` into `/Applications`.
+3. Install CodeRabbit CLI (if not already installed):
+
+```bash
+curl -fsSL https://cli.coderabbit.ai/install.sh | sh
+```
+
+4. Open the app and select a project folder.
+5. Click `Start Review`.
+
+## First Review Workflow
+
+1. Pick your project folder.
+2. Choose:
+   - `Review Type`: all, committed, or uncommitted
+   - `Review Output`: full or prompt-only
+3. Start review and follow progress live.
+4. Inspect findings and copy AI prompts for your coding agent.
 
 ## Requirements
 
-- macOS with Xcode 15+ (or equivalent SwiftUI/macOS toolchain)
-- CodeRabbit CLI installed (`coderabbit`)
+- macOS
+- `coderabbit` CLI installed
+- A git repository to review
 
-## Run
+## Need Help or Want a Feature?
 
-Open `CodeRabbit.xcodeproj` in Xcode and run the app target.
+- Report a bug: [Create bug ticket](https://github.com/GioPalusa/codeRabbitUI/issues/new?template=bug_report.md)
+- Request a feature: [Create feature ticket](https://github.com/GioPalusa/codeRabbitUI/issues/new?template=feature_request.md)
+- Track current work: [Issues board](https://github.com/GioPalusa/codeRabbitUI/issues)
 
-If auto-discovery fails on a specific machine, paste the full binary path into the "CodeRabbit executable path override" field.
+Please include app version, macOS version, and reproduction steps in tickets.
 
-## Build Signed + Notarized DMG
+## Build from Source (Optional)
 
-1. Ensure your app is signed and notarized (`CodeRabbit.app`).
-2. Store notarization credentials once:
-   ```bash
-   xcrun notarytool store-credentials AC_NOTARY \
-     --apple-id "<apple-id>" \
-     --team-id "<team-id>" \
-     --password "<app-specific-password>"
-   ```
-3. Run:
-   ```bash
-   DEVELOPER_ID_APP_CERT="Developer ID Application: <Your Name> (<TEAMID>)" \
-   NOTARY_PROFILE="AC_NOTARY" \
-   ./scripts/create_signed_notarized_dmg.sh
-   ```
+Open `CodeRabbit.xcodeproj` in Xcode and run target `CodeRabbit`.
 
-Output DMG is written to `dist/`.
+## Disclaimer
 
-If your `.app` is already notarized and you want to skip local preflight verification:
-
-```bash
-SKIP_APP_VERIFY=1 \
-DEVELOPER_ID_APP_CERT="Developer ID Application: <Your Name> (<TEAMID>)" \
-NOTARY_PROFILE="AC_NOTARY" \
-./scripts/create_signed_notarized_dmg.sh
-```
-
-To include a custom DMG background image (PNG):
-
-```bash
-BACKGROUND_IMAGE="/absolute/path/to/dmg-background.png" \
-DEVELOPER_ID_APP_CERT="Developer ID Application: <Your Name> (<TEAMID>)" \
-NOTARY_PROFILE="AC_NOTARY" \
-./scripts/create_signed_notarized_dmg.sh
-```
-
-The script will:
-- add `.background/background.png` inside the DMG
-- place your app and `/Applications` link in a Finder window
-- set the Finder background image before signing/notarizing
-
-## Notes
-
-- The parser currently supports common patterns like:
-  - `path/file.swift:42: warning: message`
-  - `[WARNING] path/file.swift:42 message`
-  - Plain-text review sections including:
-    - `Comment:`
-    - `Proposed fix` diffs
-    - `Prompt for AI Agent:`
-- The review command is selected from New Review output mode (full vs prompt-only).
-- Use Settings to clear stored review history at any time.
+This app is an independent client for the CodeRabbit CLI.
+It is not affiliated with, endorsed by, or maintained by CodeRabbit, Inc. or CodeRabbit AI.

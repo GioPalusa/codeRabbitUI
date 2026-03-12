@@ -193,6 +193,58 @@ extension ContentView {
         return nil
     }
 
+    func checkForAppUpdate() {
+        Task {
+            let result = await AppUpdateService.checkForUpdates()
+            await MainActor.run {
+                switch result {
+                case let .updateAvailable(updateInfo):
+                    appUpdateInfo = updateInfo
+                case .upToDate:
+                    appUpdateInfo = nil
+                case .failed:
+                    appUpdateInfo = nil
+                }
+            }
+        }
+    }
+
+    func appUpdatePromptCard(updateInfo: AppUpdateInfo) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "arrow.down.circle.fill")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(triggerActionTintColor)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("CodeRabbit app update available")
+                    .font(.headline)
+                    .foregroundStyle(triggerHeroTitleColor)
+                Text("Installed \(updateInfo.currentVersion) -> Latest \(updateInfo.latestVersion)")
+                    .font(.subheadline)
+                    .foregroundStyle(triggerHeroSubtitleColor)
+            }
+
+            Spacer(minLength: 0)
+
+            if let directDownloadURL = updateInfo.directDownloadURL {
+                Button("Download DMG") {
+                    NSWorkspace.shared.open(directDownloadURL)
+                }
+                .buttonStyle(.bordered)
+                .tint(triggerActionTintColor)
+            }
+
+            Button("View Release") {
+                NSWorkspace.shared.open(updateInfo.releaseURL)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(triggerActionTintColor)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlassCard(cornerRadius: 14, borderColor: triggerActionTintColor.opacity(0.7), lineWidth: 1.2)
+    }
+
     func cliUpdatePromptCard(command: String) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
@@ -493,6 +545,25 @@ extension ContentView {
         return historyStore.items
     }
 
+    var historySidebarPreviewLimit: Int {
+        10
+    }
+
+    var sidebarHistoryItems: [ReviewHistoryItem] {
+        if sidebarShowsAllHistoryItems {
+            return displayedHistoryItems
+        }
+        return Array(displayedHistoryItems.prefix(historySidebarPreviewLimit))
+    }
+
+    var canShowMoreSidebarHistory: Bool {
+        !sidebarShowsAllHistoryItems && displayedHistoryItems.count > historySidebarPreviewLimit
+    }
+
+    var hiddenSidebarHistoryCount: Int {
+        max(displayedHistoryItems.count - historySidebarPreviewLimit, 0)
+    }
+
     var inProgressHistoryItem: ReviewHistoryItem? {
         guard let runID = runner.currentRunID else { return nil }
         return ReviewHistoryItem(
@@ -518,7 +589,7 @@ extension ContentView {
         var grouped: [String: [ReviewHistoryItem]] = [:]
         var order: [String] = []
 
-        for item in displayedHistoryItems {
+        for item in sidebarHistoryItems {
             let folderPath = normalizedFolderPath(item.folderPath)
             if grouped[folderPath] == nil {
                 grouped[folderPath] = []
@@ -546,6 +617,38 @@ extension ContentView {
                 }
             }
         )
+    }
+
+    func promptClearHistory(for folderPath: String) {
+        clearProjectHistoryFolderPath = normalizedFolderPath(folderPath)
+        showClearProjectHistoryConfirmation = true
+    }
+
+    func clearPendingProjectHistory() {
+        let targetFolderPath = clearProjectHistoryFolderPath
+        guard !targetFolderPath.isEmpty else { return }
+
+        let selectedHistoryFolderPath: String?
+        if case let .history(id) = selection {
+            selectedHistoryFolderPath = historyItem(for: id)?.folderPath
+        } else {
+            selectedHistoryFolderPath = nil
+        }
+
+        historyStore.clearHistory(forFolderPath: targetFolderPath)
+        collapsedHistoryFolders.remove(targetFolderPath)
+
+        if let selectedHistoryFolderPath,
+           normalizedFolderPath(selectedHistoryFolderPath) == targetFolderPath {
+            selection = .current
+            selectedHistoryTab = 0
+        }
+
+        clearProjectHistoryFolderPath = ""
+        showClearProjectHistoryConfirmation = false
+        if displayedHistoryItems.count <= historySidebarPreviewLimit {
+            sidebarShowsAllHistoryItems = false
+        }
     }
 
     func historyFolderName(for folderPath: String) -> String {
