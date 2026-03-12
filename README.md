@@ -6,6 +6,8 @@
 
 Run CodeRabbit reviews from a fast native macOS app instead of juggling terminal commands.
 
+![Screenshot](https://github.com/GioPalusa/codeRabbitUI/blob/main/coderabbitUI-start.png)
+
 CodeRabbit for macOS is built for developers who want:
 
 - A clean review workflow with less setup friction
